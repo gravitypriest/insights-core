@@ -20,6 +20,8 @@ from .utilities import (delete_registered_file,
                         get_tags,
                         write_tags)
 
+from .log import set_up_logging
+
 NETWORK = constants.custom_network_log_level
 logger = logging.getLogger(__name__)
 
@@ -49,7 +51,7 @@ class InsightsClient(object):
         # setup_logging is True when called from phase, but not from wrapper.
         #  use this to do any common init (like auto_config)
         if setup_logging:
-            self.set_up_logging()
+            set_up_logging(self.config)
             try_auto_configuration(self.config)
         else:
             # write PID to file in case we need to ping systemd
@@ -78,9 +80,6 @@ class InsightsClient(object):
     def get_conf(self):
         # need this getter to maintain compatability with RPM wrapper
         return self.config
-
-    def set_up_logging(self):
-        return client.set_up_logging(self.config)
 
     def version(self):
         return "%s-%s" % (package_info["VERSION"], package_info["RELEASE"])

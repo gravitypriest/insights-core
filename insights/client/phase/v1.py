@@ -138,11 +138,6 @@ def post_update(client, config):
     logger.debug("CONFIG: %s", config)
     print_egg_versions()
 
-    # --registering an AWS machine
-    if config.portal_access or config.portal_access_no_insights:
-        logger.debug('Entitling an AWS host. Bypassing registration check.')
-        return
-
     if config.show_results:
         try:
             client.show_results()
@@ -158,52 +153,6 @@ def post_update(client, config):
         except Exception as e:
             print(e)
             sys.exit(constants.sig_kill_bad)
-
-    # -------delete everything below this line-------
-    if config.legacy_upload:
-        if config.status:
-            reg_check = client.get_registration_status()
-            for msg in reg_check['messages']:
-                logger.info(msg)
-            if reg_check['status']:
-                sys.exit(constants.sig_kill_ok)
-            else:
-                sys.exit(constants.sig_kill_bad)
-
-        # put this first to avoid conflicts with register
-        if config.unregister:
-            if client.unregister():
-                sys.exit(constants.sig_kill_ok)
-            else:
-                sys.exit(constants.sig_kill_bad)
-
-        if config.offline:
-            logger.debug('Running client in offline mode. Bypassing registration.')
-            return
-
-        if config.display_name and not config.register:
-            # setting display name independent of registration
-            if client.set_display_name(config.display_name):
-                if 'display_name' in config._cli_opts:
-                    # only exit on success if it was invoked from command line
-                    sys.exit(constants.sig_kill_ok)
-            else:
-                sys.exit(constants.sig_kill_bad)
-
-        reg = client.register()
-        if reg is None:
-            # API unreachable
-            logger.info('Could not connect to the Insights API. Run insights-client --test-connection for more information.')
-            sys.exit(constants.sig_kill_bad)
-        elif reg is False:
-            # unregistered
-            sys.exit(constants.sig_kill_bad)
-        if config.register:
-            if (not config.disable_schedule and
-               get_scheduler(config).set_daily()):
-                logger.info('Automatic scheduling for Insights has been enabled.')
-        return
-    # -------delete everything above this line-------
 
     if config.offline:
         logger.debug('Running client in offline mode. Bypassing registration.')
@@ -275,12 +224,6 @@ def post_update(client, config):
 def collect_and_output(client, config):
     # last phase, delete PID file on exit
     atexit.register(write_to_disk, constants.pidfile, delete=True)
-    # register cloud (aws)
-    if config.portal_access or config.portal_access_no_insights:
-        if aws_main(config):
-            sys.exit(constants.sig_kill_ok)
-        else:
-            sys.exit(constants.sig_kill_bad)
     # --compliance was called
     if config.compliance:
         config.payload, config.content_type = ComplianceClient(config).oscap_scan()
