@@ -1,4 +1,0 @@
-[submodule "insights/client"]
-	path = insights/client
-	url = git@github.com:gravitypriest/insights-client-egg.git
-	branch = stable
