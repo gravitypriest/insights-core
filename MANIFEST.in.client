@@ -12,3 +12,4 @@ prune insights/tests
 prune insights/tool
 include insights/parsers/__init__.py
 include insights/combiners/__init__.py
+include insights/client/VERSION
