@@ -1,24 +1,54 @@
 #!/bin/bash
 PYTHON=${1:-python}
 CLIENT_REFS=("nightly" "beta" "stable")
-BUILD_DIR=$(pwd)
-CLIENT_DIR=$BUILD_DIR/insights/client
+BUILD_DIR=$(pwd) #$(mktemp -d -t insights-core-egg-build-XXXXXXXX)
+CORE_DIR=$BUILD_DIR/insights-core
+CORE_ASSETS_DIR=$BUILD_DIR/insights-core-assets
+PLUGINS_DIR=$BUILD_DIR/insights-plugins
+PRODSEC_RULES_DIR=$BUILD_DIR/insights-prodsec-rules
+CLIENT_DIR=$CORE_DIR/insights/client
 
-git clone git@github.com:gravitypriest/insights-client-runner.git $CLIENT_DIR
+cd $BUILD_DIR
 
-# ./build_client_egg.sh
-# ./build_client_egg.sh --release
-# ./build_client_egg.sh --release --force
+# clone repos
+git clone git@github.com:gravitypriest/insights-core.git
+if [ $? -ne 0 ]; then exit; fi
+git clone git@gitlab.cee.redhat.com:prodsec/insights-prodsec-rules.git
+if [ $? -ne 0 ]; then exit; fi
+git clone git@gitlab.cee.redhat.com:insights-rules/insights-plugins.git
+if [ $? -ne 0 ]; then exit; fi
+git clone git@gitlab.cee.redhat.com:insights-release-eng/insights-core-assets.git
+if [ $? -ne 0 ]; then exit; fi
 
-# Warn about uncommitted changes and untracked files
-# check to make sure tree is clean before checkout (so no uncommitted changes get overwritten)
+# do the filters and uploader_json_map.json here
+# ASSUMES RELEASE IS READY TO GO AND THE INSIGHTS-CORE-ASSETS
+#   UPLOADER_JSON BRANCH IS STAGED WITH CHANGES. NOT MY FAULT IF IT'S NOT
 
-if [ $? -eq 128 ]
-then
-    # dir exists
-    echo "Could not clone insights-client-runner."
+cd $PLUGINS_DIR
+$PYTHON setup.py bootstrap
+source bin/activate
+pip3 install -e $CORE_DIR
+pip3 install -e $PRODSEC_RULES_DIR
+
+echo "Generating filters.yaml for insights-core..."
+$PYTHON -m insights.tools.apply_spec_filters $CORE_ASSETS_DIR/uploader.json telemetry.rules.plugins prodsec.rules
+$PYTHON -m insights.tools.apply_spec_filters $CORE_ASSETS_DIR/uploader.v2.json telemetry.rules.plugins prodsec.rules
+deactivate
+
+# verify filters.yaml was created
+if [ ! -e $CORE_DIR/insights/filters.yaml ]; then
+    echo "ERROR: filters.yaml not found. Somebody set up us the bomb."
     exit
 fi
+
+# copy uploader.json to uploader_json_map.json
+cp $CORE_ASSETS_DIR/uploader.v2.json $CORE_DIR/uploader_json_map.json
+
+# run unit test to make sure everything is peachy (check for any missing specs or ones that need to be renamed)
+$PYTHON -m pytest -p no:cacheprovider $CORE_DIR/insights/tests/client/collection_rules/test_map_components.py
+
+git clone git@github.com:gravitypriest/insights-client-runner.git $CLIENT_DIR
+if [ $? -ne 0 ]; then exit; fi
 
 for ref in ${CLIENT_REFS[@]}
 do
@@ -27,7 +57,12 @@ do
     CLIENT_VERSION=$(git describe --tags --match '*.*.*')
     echo $CLIENT_VERSION > VERSION      # make sure version tag and VERSION file match
     # handle error if there's no matching version tag for the CLIENT_REFS tags (there should be!!)
-    cd $BUILD_DIR
+    cd $CORE_DIR
+
+    if [ $? -ne 0 ]; then
+        echo "Error verifying uploader.json map. Update the unit test to allow any missing specs, or modify map_components if any need to be renamed."
+        exit
+    fi
 
     # rest of the script is the same as it was before, but we create multiple zips
     rm -f insights_$ref.zip
@@ -51,4 +86,6 @@ do
     cd ..
     rm -rf tmp
     git checkout MANIFEST.in
+
+    mv insights_$ref.zip $BUILD_DIR
 done
