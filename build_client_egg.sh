@@ -1,7 +1,8 @@
 #!/bin/bash
 PYTHON=${1:-python}
 CLIENT_REFS=("nightly" "beta" "stable")
-BUILD_DIR=$(pwd) #$(mktemp -d -t insights-core-egg-build-XXXXXXXX)
+BUILD_DIR=$(mktemp -d -t insights-core-egg-build-XXXXXXXX)
+OUTPUT_DIR=$(pwd)
 CORE_DIR=$BUILD_DIR/insights-core
 CORE_ASSETS_DIR=$BUILD_DIR/insights-core-assets
 PLUGINS_DIR=$BUILD_DIR/insights-plugins
@@ -44,20 +45,28 @@ fi
 # copy uploader.json to uploader_json_map.json
 cp $CORE_ASSETS_DIR/uploader.v2.json $CORE_DIR/uploader_json_map.json
 
-# run unit test to make sure everything is peachy (check for any missing specs or ones that need to be renamed)
-$PYTHON -m pytest -p no:cacheprovider $CORE_DIR/insights/tests/client/collection_rules/test_map_components.py
-
 git clone git@github.com:gravitypriest/insights-client-runner.git $CLIENT_DIR
 if [ $? -ne 0 ]; then exit; fi
 
+# build for each branch
 for ref in ${CLIENT_REFS[@]}
 do
     cd $CLIENT_DIR
-    git checkout $ref
-    CLIENT_VERSION=$(git describe --tags --match '*.*.*')
-    echo $CLIENT_VERSION > VERSION      # make sure version tag and VERSION file match
+    git checkout -f $ref
+    CLIENT_VERSION=$(git describe --tags --exact-match --match '[0-9]*.[0-9]*.[0-9]*')
     # handle error if there's no matching version tag for the CLIENT_REFS tags (there should be!!)
+    if [ $? -ne 0 ]; then
+        echo "ERROR: No N.V.R-formatted version tag found. Make sure $ref HEAD is a commit tagged with a version."
+        exit
+    fi
+
+    # make sure version tag is written to VERSION (it's "dev" in the repo)
+    echo $CLIENT_VERSION > VERSION
     cd $CORE_DIR
+
+    # run unit test to make sure everything in the uploader.json map is peachy
+    #   (check for any missing specs or ones that need to be renamed)
+    $PYTHON -m pytest -p no:cacheprovider $CORE_DIR/insights/tests/client/collection_rules/test_map_components.py
 
     if [ $? -ne 0 ]; then
         echo "Error verifying uploader.json map. Update the unit test to allow any missing specs, or modify map_components if any need to be renamed."
@@ -77,6 +86,8 @@ do
     rm -rf insights/archive
     find insights -path '*tests/*' -delete
     find insights -name '*.pyc' -delete
+    # delete the git metadata from insights/client
+    find insights/client -path '*.git/*' -delete
 
     git rev-parse --short HEAD > insights/COMMIT
 
@@ -87,5 +98,7 @@ do
     rm -rf tmp
     git checkout MANIFEST.in
 
-    mv insights_$ref.zip $BUILD_DIR
+    mv insights_$ref.zip $OUTPUT_DIR
 done
+
+rm -rf $BUILD_DIR
